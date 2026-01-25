@@ -42,15 +42,16 @@
 2. 将待处理的图片url通过prompt传递给模型
 
 ### 图像内容识别
-![图像内容识别](assets/muse-ai.png)  
-
 提示词：
 ```prompt
 https://muse-ai.oss-cn-hangzhou.aliyuncs.com/img/fd7409815bb94bddba84191e21a803a2.png
 查看这张图片
 ```
+
+![图像内容识别](assets/muse-ai.png)  
+
+
 ### 图像内容裁剪
-![图像内容裁剪](assets/我已经成功定位并裁剪出了图中的太阳.png)  
 
 提示词：
 ```prompt
@@ -58,8 +59,11 @@ https://muse-ai.oss-cn-hangzhou.aliyuncs.com/img/fd7409815bb94bddba84191e21a803a
 裁剪出图中的太阳
 裁剪完成后展示出原图和裁剪结果
 ```
+
+![图像内容裁剪](assets/我已经成功定位并裁剪出了图中的太阳.png)  
+
+
 ### 图像文字提取
-![图像文字OCR识别](assets/我识别了图中的文字并提取了相关信息.png)  
 
 提示词：
 ```prompt
@@ -67,6 +71,10 @@ https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-Image/image2512/arena.png#c
 识别图中文字
 并且展示图片
 ```
+
+![图像文字OCR识别](assets/我识别了图中的文字并提取了相关信息.png)  
+
+
 ## 五、部署方式
 
 ### 环境要求
