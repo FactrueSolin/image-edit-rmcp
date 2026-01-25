@@ -1,8 +1,8 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use reqwest::Client;
 use serde::Deserialize;
-use serde_json::{json, Value};
-use tokio::time::{sleep, Duration, Instant};
+use serde_json::{Value, json};
+use tokio::time::{Duration, Instant, sleep};
 
 const MODELSCOPE_API_ROOT: &str = "https://api-inference.modelscope.cn";
 const MODELSCOPE_BASE_URL: &str = "https://api-inference.modelscope.cn/v1";
@@ -43,9 +43,7 @@ async fn assert_ok_response(response: reqwest::Response) -> Result<reqwest::Resp
     }
     let status = response.status();
     let text = response.text().await.unwrap_or_default();
-    Err(anyhow!(
-        "ModelScope 请求失败: {status} {text}"
-    ))
+    Err(anyhow!("ModelScope 请求失败: {status} {text}"))
 }
 
 #[derive(Debug, Deserialize)]
@@ -172,6 +170,10 @@ pub async fn describe_image_with_qwen(
     let response = assert_ok_response(response).await?;
     let payload: ChatCompletionResponse = response.json().await?;
     if let Some(error) = payload.error.and_then(|err| err.message) {
+        eprintln!(
+            "[ERROR] locate_object_with_qwen ModelScope 返回错误: message={}, prompt={}, image_url={}",
+            error, prompt, image_url
+        );
         return Err(anyhow!("ModelScope 返回错误: {error}"));
     }
     let content = payload
@@ -183,7 +185,10 @@ pub async fn describe_image_with_qwen(
 
     let raw = content.trim();
     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(raw) {
-        let name = parsed.get("name").and_then(|value| value.as_str()).unwrap_or("");
+        let name = parsed
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
         let description = parsed
             .get("description")
             .and_then(|value| value.as_str())
@@ -203,8 +208,7 @@ pub async fn locate_object_with_qwen(
 ) -> Result<Vec<BoundingBox>> {
     let client = Client::new();
     let prompt = format!(
-        "请检测图中的{}并以JSON格式输出其边界框坐标[x1, y1, x2, y2]。\n\
-如果有多个，请返回JSON数组。只返回JSON，不要包含其他文字。",
+        "返回 Box（边界框）坐标 ：检测图中所有{}并以JSON格式输出其bbox的坐标。",
         object_name
     );
     let response = client
@@ -240,7 +244,16 @@ pub async fn locate_object_with_qwen(
 
     let raw = content.trim();
     let cleaned = strip_json_fences(raw);
-    parse_bounding_boxes(&cleaned)
+    match parse_bounding_boxes(&cleaned) {
+        Ok(boxes) => Ok(boxes),
+        Err(err) => {
+            eprintln!(
+                "[ERROR] locate_object_with_qwen 解析定位结果失败: error={}, raw={}, cleaned={}, prompt={}, image_url={}",
+                err, raw, cleaned, prompt, image_url
+            );
+            Err(err)
+        }
+    }
 }
 
 fn strip_json_fences(raw: &str) -> String {
@@ -315,6 +328,17 @@ fn parse_bbox_from_value(value: &Value) -> Option<BoundingBox> {
             Some(BoundingBox { x1, y1, x2, y2 })
         }
         Value::Object(map) => {
+            for key in ["bbox_2d", "bbox", "box"] {
+                if let Some(Value::Array(coords)) = map.get(key) {
+                    if coords.len() >= 4 {
+                        let x1 = coords.get(0)?.as_f64()? as f32;
+                        let y1 = coords.get(1)?.as_f64()? as f32;
+                        let x2 = coords.get(2)?.as_f64()? as f32;
+                        let y2 = coords.get(3)?.as_f64()? as f32;
+                        return Some(BoundingBox { x1, y1, x2, y2 });
+                    }
+                }
+            }
             let x1 = map.get("x1")?.as_f64()? as f32;
             let y1 = map.get("y1")?.as_f64()? as f32;
             let x2 = map.get("x2")?.as_f64()? as f32;
@@ -330,13 +354,13 @@ pub async fn generate_image_with_zturbo(
     api_key: &str,
 ) -> Result<GenerateImageResult> {
     let client = Client::new();
-    
+
     // 构建请求体，只包含非空字段
     let mut body = json!({
         "model": Z_TURBO_MODEL,
         "prompt": options.prompt,
     });
-    
+
     if let Some(ref neg) = options.negative_prompt {
         if !neg.trim().is_empty() {
             body["negative_prompt"] = json!(neg);
@@ -348,10 +372,13 @@ pub async fn generate_image_with_zturbo(
     if let Some(steps) = options.steps {
         body["steps"] = json!(steps);
     }
-    
+
     // 调试日志：打印请求体
-    eprintln!("[DEBUG] generate_image_with_zturbo request body: {}", serde_json::to_string_pretty(&body).unwrap_or_default());
-    
+    eprintln!(
+        "[DEBUG] generate_image_with_zturbo request body: {}",
+        serde_json::to_string_pretty(&body).unwrap_or_default()
+    );
+
     let response = client
         .post(format!("{MODELSCOPE_API_ROOT}/v1/images/generations"))
         .bearer_auth(api_key)
@@ -361,14 +388,20 @@ pub async fn generate_image_with_zturbo(
         .await?;
 
     // 调试日志：打印响应状态
-    eprintln!("[DEBUG] generate_image_with_zturbo response status: {}", response.status());
-    
+    eprintln!(
+        "[DEBUG] generate_image_with_zturbo response status: {}",
+        response.status()
+    );
+
     let response = assert_ok_response(response).await?;
     let response_text = response.text().await?;
-    
+
     // 调试日志：打印响应内容
-    eprintln!("[DEBUG] generate_image_with_zturbo response body: {}", response_text);
-    
+    eprintln!(
+        "[DEBUG] generate_image_with_zturbo response body: {}",
+        response_text
+    );
+
     let payload: ImageGenerationTaskResponse = serde_json::from_str(&response_text)
         .map_err(|e| anyhow!("解析任务响应失败: {}, 原始响应: {}", e, response_text))?;
     let task_id = payload
@@ -417,9 +450,12 @@ async fn poll_generation_task(
 ) -> Result<(String, String)> {
     let deadline = Instant::now() + Duration::from_millis(DEFAULT_TIMEOUT_MS);
     let mut poll_count = 0u32;
-    
-    eprintln!("[DEBUG] poll_generation_task: starting poll for task_id={}", task_id);
-    
+
+    eprintln!(
+        "[DEBUG] poll_generation_task: starting poll for task_id={}",
+        task_id
+    );
+
     while Instant::now() <= deadline {
         poll_count += 1;
         let response = client
@@ -431,25 +467,31 @@ async fn poll_generation_task(
 
         let response = assert_ok_response(response).await?;
         let response_text = response.text().await?;
-        
+
         // 调试日志：打印轮询响应
-        eprintln!("[DEBUG] poll_generation_task: poll_count={}, response={}", poll_count, response_text);
-        
+        eprintln!(
+            "[DEBUG] poll_generation_task: poll_count={}, response={}",
+            poll_count, response_text
+        );
+
         let payload: ImageGenerationStatusResponse = serde_json::from_str(&response_text)
             .map_err(|e| anyhow!("解析任务状态响应失败: {}, 原始响应: {}", e, response_text))?;
         let status = payload
             .task_status
             .ok_or_else(|| anyhow!("ModelScope 未返回任务状态, 原始响应: {}", response_text))?;
-        
+
         eprintln!("[DEBUG] poll_generation_task: task_status={}", status);
-        
+
         match status.as_str() {
             "SUCCEED" => {
                 let image_url = payload
                     .output_images
                     .and_then(|images| images.into_iter().next())
                     .ok_or_else(|| anyhow!("ModelScope 未返回图片地址"))?;
-                eprintln!("[DEBUG] poll_generation_task: success, image_url={}", image_url);
+                eprintln!(
+                    "[DEBUG] poll_generation_task: success, image_url={}",
+                    image_url
+                );
                 return Ok((image_url, task_id.to_string()));
             }
             "FAILED" => {
@@ -468,7 +510,10 @@ async fn poll_generation_task(
                 return Err(anyhow!("ModelScope 图片生成失败: {}", error_msg));
             }
             _ => {
-                eprintln!("[DEBUG] poll_generation_task: status={}, waiting...", status);
+                eprintln!(
+                    "[DEBUG] poll_generation_task: status={}, waiting...",
+                    status
+                );
                 sleep(Duration::from_millis(DEFAULT_POLL_INTERVAL_MS)).await;
             }
         }
