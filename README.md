@@ -1,5 +1,7 @@
 # Image Edit RMCP - 图像编辑 MCP 服务
 
+[中文](README.md) | [English](README_EN.md)
+
 ## 一、项目介绍
 
 1. **对标 OpenAI Web 的图像编辑功能**：提供一个类似于 OpenAI 图像编辑功能的 MCP（Model Context Protocol）服务，支持多种图像处理操作
