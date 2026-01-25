@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>图床上传</title>
+	<style>
+		:root {
+			color-scheme: light dark;
+			--bg: #0f172a;
+			--card: #111827;
+			--text: #e5e7eb;
+			--muted: #9ca3af;
+			--accent: #38bdf8;
+			--accent-dark: #0ea5e9;
+			--border: #1f2937;
+		}
+		* {
+			box-sizing: border-box;
+			font-family: "Inter", "Noto Sans SC", system-ui, -apple-system, sans-serif;
+		}
+		body {
+			margin: 0;
+			min-height: 100vh;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			background: radial-gradient(circle at top, #0f172a 0%, #020617 55%, #000 100%);
+			color: var(--text);
+			padding: 32px 16px;
+		}
+		.card {
+			width: min(760px, 95vw);
+			background: rgba(17, 24, 39, 0.9);
+			border: 1px solid var(--border);
+			border-radius: 20px;
+			padding: 28px;
+			box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+			backdrop-filter: blur(12px);
+		}
+		h1 {
+			margin: 0 0 8px;
+			font-size: 22px;
+		}
+		p {
+			margin: 0 0 24px;
+			color: var(--muted);
+			font-size: 14px;
+		}
+		.upload-area {
+			display: grid;
+			gap: 18px;
+			grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+		}
+		.drop-zone {
+			border: 1px dashed rgba(148, 163, 184, 0.5);
+			border-radius: 14px;
+			padding: 24px;
+			text-align: center;
+			background: rgba(15, 23, 42, 0.7);
+			min-height: 220px;
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			gap: 12px;
+			transition: border-color 0.2s ease, box-shadow 0.2s ease;
+		}
+		.drop-zone.dragging {
+			border-color: var(--accent);
+			box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.4);
+		}
+		.drop-title {
+			font-weight: 600;
+			font-size: 16px;
+		}
+		.drop-hint {
+			font-size: 12px;
+			color: var(--muted);
+		}
+		.button {
+			appearance: none;
+			border: none;
+			border-radius: 10px;
+			padding: 10px 16px;
+			font-size: 14px;
+			font-weight: 600;
+			cursor: pointer;
+			transition: transform 0.15s ease, box-shadow 0.15s ease;
+		}
+		.button:active {
+			transform: scale(0.98);
+		}
+		.primary {
+			background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
+			color: #02131f;
+			box-shadow: 0 10px 24px rgba(14, 165, 233, 0.35);
+		}
+		.secondary {
+			background: rgba(148, 163, 184, 0.12);
+			color: var(--text);
+			border: 1px solid rgba(148, 163, 184, 0.3);
+		}
+		.preview {
+			border-radius: 14px;
+			border: 1px solid var(--border);
+			background: rgba(15, 23, 42, 0.6);
+			padding: 16px;
+			display: grid;
+			gap: 12px;
+		}
+		.preview img {
+			width: 100%;
+			height: auto;
+			border-radius: 12px;
+			border: 1px solid rgba(148, 163, 184, 0.3);
+			max-height: 320px;
+			object-fit: contain;
+			background: #020617;
+		}
+		.url-row {
+			display: flex;
+			gap: 12px;
+			flex-wrap: wrap;
+		}
+		.url-field {
+			flex: 1 1 260px;
+			background: rgba(2, 6, 23, 0.8);
+			border: 1px solid rgba(148, 163, 184, 0.3);
+			border-radius: 10px;
+			padding: 10px 12px;
+			color: var(--text);
+			font-size: 13px;
+		}
+		.status {
+			font-size: 12px;
+			color: var(--muted);
+		}
+		input[type="file"] {
+			display: none;
+		}
+		@media (max-width: 540px) {
+			.card {
+				padding: 22px;
+			}
+			.preview img {
+				max-height: 220px;
+			}
+		}
+	</style>
+</head>
+<body>
+	<div class="card">
+		<h1>图床上传</h1>
+		<p>上传图片并获取公开链接。支持拖拽或点击选择文件。</p>
+		<div class="upload-area">
+			<div class="drop-zone" id="dropZone">
+				<div class="drop-title">拖拽图片到此处</div>
+				<div class="drop-hint">仅支持图片格式（PNG / JPG / WEBP / GIF）</div>
+				<button class="button primary" id="pickBtn" type="button">选择图片</button>
+				<input id="fileInput" type="file" accept="image/*" />
+			</div>
+			<div class="preview">
+				<img id="previewImage" alt="上传预览" style="display:none;" />
+				<div class="url-row">
+					<input id="urlField" class="url-field" readonly placeholder="上传完成后显示公开URL" />
+					<button class="button secondary" id="copyBtn" type="button">复制链接</button>
+				</div>
+				<div id="status" class="status">等待上传。</div>
+			</div>
+		</div>
+	</div>
+	<script>
+		const dropZone = document.getElementById("dropZone");
+		const fileInput = document.getElementById("fileInput");
+		const pickBtn = document.getElementById("pickBtn");
+		const previewImage = document.getElementById("previewImage");
+		const urlField = document.getElementById("urlField");
+		const copyBtn = document.getElementById("copyBtn");
+		const status = document.getElementById("status");
+
+		const setStatus = (text, isError) => {
+			status.textContent = text;
+			status.style.color = isError ? "#fca5a5" : "var(--muted)";
+		};
+
+		const uploadFile = async (file) => {
+			if (!file) {
+				return;
+			}
+			if (!file.type || !file.type.startsWith("image/")) {
+				setStatus("请选择图片文件。", true);
+				return;
+			}
+			previewImage.src = URL.createObjectURL(file);
+			previewImage.style.display = "block";
+			urlField.value = "";
+			setStatus("上传中...", false);
+			const formData = new FormData();
+			formData.append("file", file);
+			try {
+				const response = await fetch(window.location.pathname, {
+					method: "POST",
+					body: formData,
+				});
+				const data = await response.json();
+				if (!response.ok) {
+					throw new Error(data?.error || "上传失败");
+				}
+				urlField.value = data.url || "";
+				setStatus("上传成功。", false);
+			} catch (error) {
+				setStatus(error?.message || "上传失败。", true);
+			}
+		};
+
+		pickBtn.addEventListener("click", () => fileInput.click());
+		fileInput.addEventListener("change", (event) => {
+			const target = event.target;
+			const file = target.files && target.files[0];
+			uploadFile(file);
+		});
+
+		dropZone.addEventListener("dragover", (event) => {
+			event.preventDefault();
+			dropZone.classList.add("dragging");
+		});
+		dropZone.addEventListener("dragleave", () => {
+			dropZone.classList.remove("dragging");
+		});
+		dropZone.addEventListener("drop", (event) => {
+			event.preventDefault();
+			dropZone.classList.remove("dragging");
+			const file = event.dataTransfer?.files && event.dataTransfer.files[0];
+			uploadFile(file);
+		});
+
+		copyBtn.addEventListener("click", async () => {
+			const value = urlField.value;
+			if (!value) {
+				setStatus("暂无可复制的链接。", true);
+				return;
+			}
+			try {
+				await navigator.clipboard.writeText(value);
+				setStatus("链接已复制到剪贴板。", false);
+			} catch {
+				setStatus("复制失败，请手动复制。", true);
+			}
+		});
+	</script>
+</body>
+</html>
