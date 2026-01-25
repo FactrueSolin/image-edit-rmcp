@@ -10,7 +10,7 @@ use rmcp::{
 use crate::cache::LocalFileStorage;
 use crate::tools::{
     CropImageRequest, EditImageRequest, FetchImageRequest, GenerateImageRequest,
-    GetImageInfoRequest, OcrExtractRequest, RotateImageRequest,
+    GetImageInfoRequest, LocateObjectRequest, OcrExtractRequest, RotateImageRequest,
 };
 
 #[derive(Clone)]
@@ -70,6 +70,16 @@ impl ImageEditorServer {
         Parameters(request): Parameters<OcrExtractRequest>,
     ) -> Result<CallToolResult, McpError> {
         crate::tools::ocr_extract(&self.storage, Parameters(request)).await
+    }
+
+    #[tool(
+        description = "定位图像中的指定物体，返回二维边界框坐标，在裁剪时，先使用locate_object定位物体，再使用crop_image裁剪物体"
+    )]
+    async fn locate_object(
+        &self,
+        Parameters(request): Parameters<LocateObjectRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        crate::tools::locate_object(Parameters(request)).await
     }
 
     #[tool(

@@ -1,13 +1,13 @@
 use anyhow::{anyhow, Result};
 use reqwest::Client;
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use tokio::time::{sleep, Duration, Instant};
 
 const MODELSCOPE_API_ROOT: &str = "https://api-inference.modelscope.cn";
 const MODELSCOPE_BASE_URL: &str = "https://api-inference.modelscope.cn/v1";
 const MODELSCOPE_MODEL: &str = "Qwen/Qwen3-VL-8B-Instruct";
-const OCR_PROMPT: &str = "请识别并提取图片中的所有文字内容，保持原有格式和结构。只输出识别到的文字，不要添加任何解释。";
+const OCR_PROMPT: &str = "qwenvl markdown";
 const IMAGE_DESCRIPTION_PROMPT: &str = concat!(
     "请分析这张图片，并以JSON格式回复，包含以下字段：\n",
     "1. name: 图片的简短名称（不超过10个字，直接描述主体）\n",
@@ -99,6 +99,14 @@ pub struct GenerateImageResult {
     pub task_id: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct BoundingBox {
+    pub x1: f32,
+    pub y1: f32,
+    pub x2: f32,
+    pub y2: f32,
+}
+
 pub async fn extract_image_text_with_qwen(image_url: &str, api_key: &str) -> Result<String> {
     let client = Client::new();
     let response = client
@@ -186,6 +194,135 @@ pub async fn describe_image_with_qwen(
     }
 
     Ok(("fetched-image".to_string(), raw.to_string()))
+}
+
+pub async fn locate_object_with_qwen(
+    image_url: &str,
+    object_name: &str,
+    api_key: &str,
+) -> Result<Vec<BoundingBox>> {
+    let client = Client::new();
+    let prompt = format!(
+        "请检测图中的{}并以JSON格式输出其边界框坐标[x1, y1, x2, y2]。\n\
+如果有多个，请返回JSON数组。只返回JSON，不要包含其他文字。",
+        object_name
+    );
+    let response = client
+        .post(format!("{MODELSCOPE_BASE_URL}/chat/completions"))
+        .bearer_auth(api_key)
+        .json(&json!({
+            "model": MODELSCOPE_MODEL,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": image_url}}
+                    ]
+                }
+            ],
+            "stream": false
+        }))
+        .send()
+        .await?;
+
+    let response = assert_ok_response(response).await?;
+    let payload: ChatCompletionResponse = response.json().await?;
+    if let Some(error) = payload.error.and_then(|err| err.message) {
+        return Err(anyhow!("ModelScope 返回错误: {error}"));
+    }
+    let content = payload
+        .choices
+        .and_then(|choices| choices.into_iter().next())
+        .and_then(|choice| choice.message)
+        .and_then(|msg| msg.content)
+        .ok_or_else(|| anyhow!("ModelScope 未返回定位结果"))?;
+
+    let raw = content.trim();
+    let cleaned = strip_json_fences(raw);
+    parse_bounding_boxes(&cleaned)
+}
+
+fn strip_json_fences(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.starts_with("```") {
+        let trimmed = trimmed
+            .trim_start_matches("```")
+            .trim_start_matches("json")
+            .trim();
+        if let Some(end) = trimmed.rfind("```") {
+            return trimmed[..end].trim().to_string();
+        }
+        return trimmed.to_string();
+    }
+    trimmed.to_string()
+}
+
+fn parse_bounding_boxes(raw: &str) -> Result<Vec<BoundingBox>> {
+    let value: Value = serde_json::from_str(raw)
+        .map_err(|err| anyhow!("解析定位结果 JSON 失败: {err}, 原始响应: {raw}"))?;
+    let mut boxes = Vec::new();
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                if let Some(bbox) = parse_bbox_from_value(&item) {
+                    boxes.push(bbox);
+                }
+            }
+        }
+        Value::Object(map) => {
+            for key in ["bbox", "bboxes", "boxes", "box"] {
+                if let Some(value) = map.get(key) {
+                    match value {
+                        Value::Array(items) => {
+                            for item in items {
+                                if let Some(bbox) = parse_bbox_from_value(item) {
+                                    boxes.push(bbox);
+                                }
+                            }
+                        }
+                        _ => {
+                            if let Some(bbox) = parse_bbox_from_value(value) {
+                                boxes.push(bbox);
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+            if boxes.is_empty() {
+                if let Some(bbox) = parse_bbox_from_value(&Value::Object(map)) {
+                    boxes.push(bbox);
+                }
+            }
+        }
+        _ => {}
+    }
+
+    if boxes.is_empty() {
+        return Err(anyhow!("未能从响应中解析出边界框"));
+    }
+    Ok(boxes)
+}
+
+fn parse_bbox_from_value(value: &Value) -> Option<BoundingBox> {
+    match value {
+        Value::Array(coords) if coords.len() >= 4 => {
+            let x1 = coords.get(0)?.as_f64()? as f32;
+            let y1 = coords.get(1)?.as_f64()? as f32;
+            let x2 = coords.get(2)?.as_f64()? as f32;
+            let y2 = coords.get(3)?.as_f64()? as f32;
+            Some(BoundingBox { x1, y1, x2, y2 })
+        }
+        Value::Object(map) => {
+            let x1 = map.get("x1")?.as_f64()? as f32;
+            let y1 = map.get("y1")?.as_f64()? as f32;
+            let x2 = map.get("x2")?.as_f64()? as f32;
+            let y2 = map.get("y2")?.as_f64()? as f32;
+            Some(BoundingBox { x1, y1, x2, y2 })
+        }
+        _ => None,
+    }
 }
 
 pub async fn generate_image_with_zturbo(
