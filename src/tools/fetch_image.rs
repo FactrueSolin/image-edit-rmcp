@@ -5,7 +5,7 @@ use rmcp::{
     model::{CallToolResult, Content},
     schemars::JsonSchema,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use chrono::Utc;
 
@@ -28,6 +28,16 @@ pub struct FetchImageRequest {
     pub focus: Option<String>,
 }
 
+#[derive(Debug, Serialize, JsonSchema)]
+struct ImageInfo {
+    pub width: u32,
+    pub height: u32,
+    pub total_pixels: u64,
+    pub mime_type: String,
+    pub size: usize,
+    pub aspect_ratio: Option<f64>,
+}
+
 pub async fn fetch_image(
     storage: &LocalFileStorage,
     Parameters(request): Parameters<FetchImageRequest>,
@@ -45,11 +55,27 @@ pub async fn fetch_image(
     let meta_key = LocalFileStorage::get_meta_key(&prefix);
     if let Ok(Some(meta_bytes)) = storage.get(&meta_key).await {
         if let Ok(metadata) = serde_json::from_slice::<ImageCacheMetadata>(&meta_bytes) {
+            let width = metadata.width.unwrap_or_default();
+            let height = metadata.height.unwrap_or_default();
+            let info = ImageInfo {
+                width,
+                height,
+                total_pixels: (width as u64).saturating_mul(height as u64),
+                mime_type: metadata.mime_type.clone(),
+                size: metadata.size.unwrap_or_default(),
+                aspect_ratio: metadata.aspect_ratio,
+            };
+            let info_json = serde_json::to_string(&info).map_err(|err| {
+                McpError::internal_error(
+                    "serialize image info failed",
+                    Some(serde_json::Value::String(err.to_string())),
+                )
+            })?;
             let response = ToolResponse {
                 url: metadata.original_url,
                 name: metadata.name,
                 mime_type: metadata.mime_type,
-                text: metadata.description,
+                text: format!("{}\n\n图像信息: {}", metadata.description, info_json),
             };
             let json = serde_json::to_string(&response).map_err(|err| {
                 McpError::internal_error(
@@ -125,6 +151,20 @@ pub async fn fetch_image(
             (width, height, aspect_ratio)
         })
         .unwrap_or((0, 0, None));
+    let info = ImageInfo {
+        width,
+        height,
+        total_pixels: (width as u64).saturating_mul(height as u64),
+        mime_type: mime_type.clone(),
+        size: bytes.len(),
+        aspect_ratio,
+    };
+    let info_json = serde_json::to_string(&info).map_err(|err| {
+        McpError::internal_error(
+            "serialize image info failed",
+            Some(serde_json::Value::String(err.to_string())),
+        )
+    })?;
     let metadata = ImageCacheMetadata {
         original_url: validated_url.clone(),
         mime_type: mime_type.clone(),
@@ -154,7 +194,7 @@ pub async fn fetch_image(
         url: validated_url,
         name,
         mime_type,
-        text: description,
+        text: format!("{}\n\n图像信息: {}", description, info_json),
     };
     let json = serde_json::to_string(&response).map_err(|err| {
         McpError::internal_error(

@@ -10,7 +10,7 @@ use rmcp::{
 use crate::cache::LocalFileStorage;
 use crate::tools::{
     CropImageRequest, EditImageRequest, FetchImageRequest, GenerateImageRequest,
-    GetImageInfoRequest, LocateObjectRequest, OcrExtractRequest, RotateImageRequest,
+    LocateObjectRequest, OcrExtractRequest, RotateImageRequest,
 };
 
 #[derive(Clone)]
@@ -54,14 +54,6 @@ impl ImageEditorServer {
         Parameters(request): Parameters<CropImageRequest>,
     ) -> Result<CallToolResult, McpError> {
         crate::tools::crop_image(&self.storage, Parameters(request)).await
-    }
-
-    #[tool(description = "获取图像信息，使用![](url)是方式展现图片")]
-    async fn get_image_info(
-        &self,
-        Parameters(request): Parameters<GetImageInfoRequest>,
-    ) -> Result<CallToolResult, McpError> {
-        crate::tools::get_image_info(Parameters(request)).await
     }
 
     #[tool(description = "OCR文字提取, 提取完成后需要使用![](url)是方式展现图片")]
