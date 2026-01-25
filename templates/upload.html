@@ -101,6 +101,12 @@
 			color: var(--text);
 			border: 1px solid rgba(148, 163, 184, 0.3);
 		}
+		.button:disabled {
+			opacity: 0.6;
+			cursor: not-allowed;
+			transform: none;
+			box-shadow: none;
+		}
 		.preview {
 			border-radius: 14px;
 			border: 1px solid var(--border);
@@ -136,6 +142,16 @@
 			font-size: 12px;
 			color: var(--muted);
 		}
+		.action-row {
+			display: flex;
+			gap: 12px;
+			flex-wrap: wrap;
+			align-items: center;
+		}
+		.paste-hint {
+			font-size: 12px;
+			color: var(--muted);
+		}
 		input[type="file"] {
 			display: none;
 		}
@@ -157,11 +173,16 @@
 			<div class="drop-zone" id="dropZone">
 				<div class="drop-title">拖拽图片到此处</div>
 				<div class="drop-hint">仅支持图片格式（PNG / JPG / WEBP / GIF）</div>
+				<div class="drop-hint">支持 Ctrl/Cmd+V 粘贴图片</div>
 				<button class="button primary" id="pickBtn" type="button">选择图片</button>
 				<input id="fileInput" type="file" accept="image/*" />
 			</div>
 			<div class="preview">
 				<img id="previewImage" alt="上传预览" style="display:none;" />
+				<div class="action-row">
+					<button class="button primary" id="uploadBtn" type="button" disabled>上传并获取URL</button>
+					<span class="paste-hint" id="pasteHint">提示：可使用 Ctrl/Cmd+V 粘贴图片</span>
+				</div>
 				<div class="url-row">
 					<input id="urlField" class="url-field" readonly placeholder="上传完成后显示公开URL" />
 					<button class="button secondary" id="copyBtn" type="button">复制链接</button>
@@ -174,30 +195,66 @@
 		const dropZone = document.getElementById("dropZone");
 		const fileInput = document.getElementById("fileInput");
 		const pickBtn = document.getElementById("pickBtn");
+		const uploadBtn = document.getElementById("uploadBtn");
 		const previewImage = document.getElementById("previewImage");
 		const urlField = document.getElementById("urlField");
 		const copyBtn = document.getElementById("copyBtn");
 		const status = document.getElementById("status");
+		const pasteHint = document.getElementById("pasteHint");
+
+		let selectedFile = null;
+		let previewUrl = "";
 
 		const setStatus = (text, isError) => {
 			status.textContent = text;
 			status.style.color = isError ? "#fca5a5" : "var(--muted)";
 		};
 
-		const uploadFile = async (file) => {
+		const revokePreviewUrl = () => {
+			if (previewUrl) {
+				URL.revokeObjectURL(previewUrl);
+				previewUrl = "";
+			}
+		};
+
+		const setUploadEnabled = (enabled) => {
+			uploadBtn.disabled = !enabled;
+		};
+
+		const setSelectedFile = (file) => {
 			if (!file) {
+				selectedFile = null;
+				revokePreviewUrl();
+				previewImage.style.display = "none";
+				previewImage.src = "";
+				setUploadEnabled(false);
 				return;
 			}
 			if (!file.type || !file.type.startsWith("image/")) {
 				setStatus("请选择图片文件。", true);
+				setUploadEnabled(false);
 				return;
 			}
-			previewImage.src = URL.createObjectURL(file);
+			selectedFile = file;
+			revokePreviewUrl();
+			previewUrl = URL.createObjectURL(file);
+			previewImage.src = previewUrl;
 			previewImage.style.display = "block";
 			urlField.value = "";
+			setStatus("已选择，等待上传。", false);
+			setUploadEnabled(true);
+		};
+
+		const uploadSelectedFile = async () => {
+			if (!selectedFile) {
+				setStatus("请先选择图片后再上传。", true);
+				setUploadEnabled(false);
+				return;
+			}
 			setStatus("上传中...", false);
+			setUploadEnabled(false);
 			const formData = new FormData();
-			formData.append("file", file);
+			formData.append("file", selectedFile);
 			try {
 				const response = await fetch(window.location.pathname, {
 					method: "POST",
@@ -211,6 +268,7 @@
 				setStatus("上传成功。", false);
 			} catch (error) {
 				setStatus(error?.message || "上传失败。", true);
+				setUploadEnabled(true);
 			}
 		};
 
@@ -218,7 +276,11 @@
 		fileInput.addEventListener("change", (event) => {
 			const target = event.target;
 			const file = target.files && target.files[0];
-			uploadFile(file);
+			setSelectedFile(file);
+		});
+
+		uploadBtn.addEventListener("click", () => {
+			uploadSelectedFile();
 		});
 
 		dropZone.addEventListener("dragover", (event) => {
@@ -232,8 +294,31 @@
 			event.preventDefault();
 			dropZone.classList.remove("dragging");
 			const file = event.dataTransfer?.files && event.dataTransfer.files[0];
-			uploadFile(file);
+			setSelectedFile(file);
 		});
+
+		window.addEventListener("paste", (event) => {
+			if (!event.clipboardData) {
+				setStatus("当前浏览器不支持剪贴板读取。", true);
+				return;
+			}
+			const items = Array.from(event.clipboardData.items || []);
+			const imageItem = items.find((item) => item.type && item.type.startsWith("image/"));
+			if (!imageItem) {
+				setStatus("剪贴板中没有可用的图片。", true);
+				return;
+			}
+			const file = imageItem.getAsFile();
+			if (!file) {
+				setStatus("读取剪贴板图片失败，请检查权限。", true);
+				return;
+			}
+			setSelectedFile(file);
+		});
+
+		if (!(navigator.clipboard && window.ClipboardEvent)) {
+			pasteHint.textContent = "当前浏览器可能不支持粘贴图片。";
+		}
 
 		copyBtn.addEventListener("click", async () => {
 			const value = urlField.value;
