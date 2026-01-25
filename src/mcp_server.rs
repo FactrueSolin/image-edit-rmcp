@@ -64,7 +64,7 @@ impl ImageEditorServer {
         crate::tools::get_image_info(Parameters(request)).await
     }
 
-    #[tool(description = "OCR文字提取")]
+    #[tool(description = "OCR文字提取, 提取完成后需要使用![](url)是方式展现图片")]
     async fn ocr_extract(
         &self,
         Parameters(request): Parameters<OcrExtractRequest>,
