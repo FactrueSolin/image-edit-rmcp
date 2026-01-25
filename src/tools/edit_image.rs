@@ -10,7 +10,7 @@ use chrono::Utc;
 use crate::{
     cache::{AiImageRecord, LocalFileStorage, save_ai_image_record},
     modelscope,
-    tools::ToolResponse,
+    tools::{ToolResponse, validate_http_url},
 };
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -29,6 +29,8 @@ pub async fn edit_image(
     _storage: &LocalFileStorage,
     Parameters(request): Parameters<EditImageRequest>,
 ) -> Result<CallToolResult, McpError> {
+    let validated_url = validate_http_url(&request.image_url)?;
+    let validated_url = validated_url.to_string();
     let api_key = std::env::var("MODELSCOPE_API_KEY")
         .map_err(|_| McpError::internal_error("missing MODELSCOPE_API_KEY", None))?;
     if api_key.trim().is_empty() {
@@ -38,11 +40,11 @@ pub async fn edit_image(
         ));
     }
     let prompt = request.prompt.clone();
-    let source_image_url = request.image_url.clone();
+    let source_image_url = validated_url.clone();
     let size = request.size.clone();
     let steps = request.steps;
     let image_url = modelscope::edit_image_with_qwen(
-        &request.image_url,
+        &validated_url,
         &request.prompt,
         request.size.as_deref(),
         request.steps,

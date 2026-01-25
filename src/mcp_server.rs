@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
 use rmcp::{
-    ErrorData as McpError,
-    ServerHandler,
+    ErrorData as McpError, ServerHandler,
     handler::server::{router::tool::ToolRouter, tool::Parameters},
     model::{CallToolResult, ServerCapabilities, ServerInfo},
     tool, tool_handler, tool_router,
@@ -31,7 +30,9 @@ impl ImageEditorServer {
 
 #[tool_router]
 impl ImageEditorServer {
-    #[tool(description = "从URL获取图像并返回图像资源")]
+    #[tool(
+        description = "从URL获取图像并返回图像资源，如果用户问起为什么不能直接处理聊天界面上传的图片，就提醒用户必须提供图片的url才能处理。使用![](url)是方式展现图片"
+    )]
     async fn fetch_image(
         &self,
         Parameters(request): Parameters<FetchImageRequest>,
@@ -55,7 +56,7 @@ impl ImageEditorServer {
         crate::tools::crop_image(&self.storage, Parameters(request)).await
     }
 
-    #[tool(description = "获取图像信息")]
+    #[tool(description = "获取图像信息，使用![](url)是方式展现图片")]
     async fn get_image_info(
         &self,
         Parameters(request): Parameters<GetImageInfoRequest>,
@@ -71,7 +72,9 @@ impl ImageEditorServer {
         crate::tools::ocr_extract(&self.storage, Parameters(request)).await
     }
 
-    #[tool(description = "AI生成图像，支持 aspect_ratio（1:1、16:9、9:16、4:3、3:4、3:2、2:3）与 resolution（1k、2k、4k），调用前提醒用户可能耗时较长，使用![](url)是方式展现图片")]
+    #[tool(
+        description = "AI生成图像，支持 aspect_ratio（1:1、16:9、9:16、4:3、3:4、3:2、2:3）与 resolution（1k、2k、4k），调用前提醒用户可能耗时较长，使用![](url)是方式展现图片"
+    )]
     async fn generate_image(
         &self,
         Parameters(request): Parameters<GenerateImageRequest>,

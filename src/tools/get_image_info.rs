@@ -7,7 +7,7 @@ use rmcp::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::image_processing;
+use crate::{image_processing, tools::validate_http_url};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct GetImageInfoRequest {
@@ -28,7 +28,9 @@ pub struct ImageInfo {
 pub async fn get_image_info(
     Parameters(request): Parameters<GetImageInfoRequest>,
 ) -> Result<CallToolResult, McpError> {
-    let response = reqwest::get(&request.url).await.map_err(|err| {
+    let validated_url = validate_http_url(&request.url)?;
+    let validated_url = validated_url.to_string();
+    let response = reqwest::get(&validated_url).await.map_err(|err| {
         McpError::internal_error(
             "fetch image failed",
             Some(serde_json::Value::String(err.to_string())),

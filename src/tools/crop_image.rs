@@ -16,7 +16,7 @@ use crate::{
         compute_hash,
     },
     image_processing,
-    tools::ToolResponse,
+    tools::{ToolResponse, validate_http_url},
 };
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -37,6 +37,8 @@ pub async fn crop_image(
     storage: &LocalFileStorage,
     Parameters(request): Parameters<CropImageRequest>,
 ) -> Result<CallToolResult, McpError> {
+    let validated_url = validate_http_url(&request.url)?;
+    let validated_url = validated_url.to_string();
     let left_value = request.left.unwrap_or(0.0);
     let top_value = request.top.unwrap_or(0.0);
     let right_value = request.right.unwrap_or(100.0);
@@ -55,7 +57,7 @@ pub async fn crop_image(
 
     let cache_key_input = format!(
         "crop:{}:{}:{}:{}:{}",
-        request.url, left_value, top_value, right_value, bottom_value
+        validated_url, left_value, top_value, right_value, bottom_value
     );
     let hash = compute_hash(&cache_key_input);
     let prefix = format!("processed/{hash}");
@@ -80,7 +82,7 @@ pub async fn crop_image(
         }
     }
 
-    let response = reqwest::get(&request.url).await.map_err(|err| {
+    let response = reqwest::get(&validated_url).await.map_err(|err| {
         McpError::internal_error(
             "fetch image failed",
             Some(serde_json::Value::String(err.to_string())),

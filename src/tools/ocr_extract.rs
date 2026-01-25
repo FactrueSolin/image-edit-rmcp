@@ -13,11 +13,10 @@ use crate::{
         LocalFileStorage,
         OcrCacheMetadata,
         compute_hash,
-        get_extension_from_mime_type,
     },
     image_processing,
     modelscope,
-    tools::ToolResponse,
+    tools::validate_http_url,
 };
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -30,7 +29,9 @@ pub async fn ocr_extract(
     storage: &LocalFileStorage,
     Parameters(request): Parameters<OcrExtractRequest>,
 ) -> Result<CallToolResult, McpError> {
-    let cache_key_input = format!("ocr:{}", request.image_url);
+    let validated_url = validate_http_url(&request.image_url)?;
+    let validated_url = validated_url.to_string();
+    let cache_key_input = format!("ocr:{}", validated_url);
     let hash = compute_hash(&cache_key_input);
     let prefix = format!("ocr/{hash}");
     let meta_key = LocalFileStorage::get_meta_key(&prefix);
@@ -44,20 +45,8 @@ pub async fn ocr_extract(
                 .flatten()
                 .map(|bytes| String::from_utf8_lossy(&bytes).to_string());
             if let Some(text) = text {
-                let response = ToolResponse {
-                    url: metadata.cached_image_url,
-                    name: "ocr-image".to_string(),
-                    mime_type: metadata.mime_type,
-                    text,
-                };
-                let json = serde_json::to_string(&response).map_err(|err| {
-                    McpError::internal_error(
-                        "serialize tool response failed",
-                        Some(serde_json::Value::String(err.to_string())),
-                    )
-                })?;
                 return Ok(CallToolResult::success(vec![
-                    Content::text(json),
+                    Content::text(text),
                 ]));
             }
         }
@@ -70,7 +59,7 @@ pub async fn ocr_extract(
             None,
         ));
     }
-    let response = reqwest::get(&request.image_url).await.map_err(|err| {
+    let response = reqwest::get(&validated_url).await.map_err(|err| {
         McpError::internal_error(
             "fetch image failed",
             Some(serde_json::Value::String(err.to_string())),
@@ -95,11 +84,11 @@ pub async fn ocr_extract(
         .and_then(|value| value.to_str().ok())
         .map(|value| value.split(';').next().unwrap_or(value).trim().to_string());
     let detected = image_processing::detect_mime_type(bytes.as_ref()).map(str::to_string);
-    let mime_type = detected
+    let _mime_type = detected
         .or(mime_from_header)
         .ok_or_else(|| McpError::internal_error("unsupported image type", None))?;
 
-    let text = modelscope::extract_image_text_with_qwen(&request.image_url, &api_key)
+    let text = modelscope::extract_image_text_with_qwen(&validated_url, &api_key)
         .await
         .map_err(|err| {
             McpError::internal_error(
@@ -108,15 +97,6 @@ pub async fn ocr_extract(
             )
         })?;
 
-    let ext = get_extension_from_mime_type(&mime_type);
-    let cached_image_key = LocalFileStorage::get_original_key(&prefix, ext);
-    storage.put(&cached_image_key, bytes.as_ref()).await.map_err(|err| {
-        McpError::internal_error(
-            "cache image failed",
-            Some(serde_json::Value::String(err.to_string())),
-        )
-    })?;
-    let cached_image_url = storage.get_public_url(&cached_image_key);
     let text_key = format!("{prefix}/ocr.txt");
     storage.put(&text_key, text.as_bytes()).await.map_err(|err| {
         McpError::internal_error(
@@ -127,9 +107,6 @@ pub async fn ocr_extract(
     let cached_text_url = storage.get_public_url(&text_key);
     let metadata = OcrCacheMetadata {
         cache_key_input,
-        cached_image_key,
-        cached_image_url: cached_image_url.clone(),
-        mime_type: mime_type.clone(),
         cached_text_key: text_key,
         cached_text_url: cached_text_url.clone(),
         created_at: Utc::now().to_rfc3339(),
@@ -147,17 +124,5 @@ pub async fn ocr_extract(
         )
     })?;
 
-    let response = ToolResponse {
-        url: cached_image_url,
-        name: "ocr-image".to_string(),
-        mime_type,
-        text,
-    };
-    let json = serde_json::to_string(&response).map_err(|err| {
-        McpError::internal_error(
-            "serialize tool response failed",
-            Some(serde_json::Value::String(err.to_string())),
-        )
-    })?;
-    Ok(CallToolResult::success(vec![Content::text(json)]))
+    Ok(CallToolResult::success(vec![Content::text(text)]))
 }

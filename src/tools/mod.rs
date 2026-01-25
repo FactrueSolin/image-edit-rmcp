@@ -5,6 +5,7 @@ pub mod generate_image;
 pub mod get_image_info;
 pub mod ocr_extract;
 pub mod rotate_image;
+pub mod url_validation;
 // pub mod list_ai_images;
 
 use serde::Serialize;
@@ -25,4 +26,5 @@ pub use generate_image::{generate_image, GenerateImageRequest};
 pub use get_image_info::{get_image_info, GetImageInfoRequest};
 pub use ocr_extract::{ocr_extract, OcrExtractRequest};
 pub use rotate_image::{rotate_image, RotateImageRequest, RotateDirection};
+pub use url_validation::validate_http_url;
 // pub use list_ai_images::{list_ai_images, ListAiImagesRequest};

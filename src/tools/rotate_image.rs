@@ -16,7 +16,7 @@ use crate::{
         compute_hash,
     },
     image_processing,
-    tools::ToolResponse,
+    tools::{ToolResponse, validate_http_url},
 };
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -39,7 +39,9 @@ pub async fn rotate_image(
     storage: &LocalFileStorage,
     Parameters(request): Parameters<RotateImageRequest>,
 ) -> Result<CallToolResult, McpError> {
-    let cache_key_input = format!("rotate:{}:{}", request.url, match request.direction {
+    let validated_url = validate_http_url(&request.url)?;
+    let validated_url = validated_url.to_string();
+    let cache_key_input = format!("rotate:{}:{}", validated_url, match request.direction {
         RotateDirection::Right90 => "right_90",
         RotateDirection::Left90 => "left_90",
         RotateDirection::Flip180 => "flip_180",
@@ -66,7 +68,7 @@ pub async fn rotate_image(
             ]));
         }
     }
-    let response = reqwest::get(&request.url).await.map_err(|err| {
+    let response = reqwest::get(&validated_url).await.map_err(|err| {
         McpError::internal_error(
             "fetch image failed",
             Some(serde_json::Value::String(err.to_string())),
