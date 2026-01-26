@@ -5,7 +5,8 @@ use rmcp::{
     model::{CallToolResult, Content},
     schemars::JsonSchema,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use tokio::task::JoinSet;
 use chrono::Utc;
 
 use crate::{
@@ -21,15 +22,77 @@ use crate::{
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct OcrExtractRequest {
-    #[schemars(description = "图像URL")]
+    #[schemars(description = "图像URL列表")]
+    pub urls: Vec<String>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct OcrResult {
     pub image_url: String,
+    pub text: String,
+    pub cached_text_url: Option<String>,
 }
 
 pub async fn ocr_extract(
     storage: &LocalFileStorage,
     Parameters(request): Parameters<OcrExtractRequest>,
 ) -> Result<CallToolResult, McpError> {
-    let validated_url = validate_http_url(&request.image_url)?;
+    if request.urls.is_empty() {
+        return Err(McpError::invalid_params("urls不能为空", None));
+    }
+
+    let total = request.urls.len();
+    let mut join_set = JoinSet::new();
+
+    for (index, url) in request.urls.into_iter().enumerate() {
+        let storage = storage.clone();
+        join_set.spawn(async move {
+            let result = ocr_single_image(&storage, &url).await;
+            (index, result)
+        });
+    }
+
+    let mut results: Vec<Option<OcrResult>> = std::iter::repeat_with(|| None)
+        .take(total)
+        .collect();
+    while let Some(task_result) = join_set.join_next().await {
+        let (index, result) = task_result.map_err(|err| {
+            McpError::internal_error(
+                "ocr extract task failed",
+                Some(serde_json::Value::String(err.to_string())),
+            )
+        })?;
+        let response = result?;
+        results[index] = Some(response);
+    }
+
+    let mut responses = Vec::with_capacity(total);
+    for item in results {
+        match item {
+            Some(response) => responses.push(response),
+            None => {
+                return Err(McpError::internal_error(
+                    "ocr extract task missing result",
+                    None,
+                ))
+            }
+        }
+    }
+
+    let json = serde_json::to_string(&responses).map_err(|err| {
+        McpError::internal_error(
+            "serialize ocr results failed",
+            Some(serde_json::Value::String(err.to_string())),
+        )
+    })?;
+    Ok(CallToolResult::success(vec![Content::text(json)]))
+}
+
+async fn ocr_single_image(
+    storage: &LocalFileStorage,
+    raw_url: &str,
+) -> Result<OcrResult, McpError> {
+    let validated_url = validate_http_url(raw_url)?;
     let validated_url = validated_url.to_string();
     let cache_key_input = format!("ocr:{}", validated_url);
     let hash = compute_hash(&cache_key_input);
@@ -45,9 +108,11 @@ pub async fn ocr_extract(
                 .flatten()
                 .map(|bytes| String::from_utf8_lossy(&bytes).to_string());
             if let Some(text) = text {
-                return Ok(CallToolResult::success(vec![
-                    Content::text(text),
-                ]));
+                return Ok(OcrResult {
+                    image_url: validated_url,
+                    text,
+                    cached_text_url: Some(metadata.cached_text_url),
+                });
             }
         }
     }
@@ -124,5 +189,9 @@ pub async fn ocr_extract(
         )
     })?;
 
-    Ok(CallToolResult::success(vec![Content::text(text)]))
+    Ok(OcrResult {
+        image_url: validated_url,
+        text,
+        cached_text_url: Some(cached_text_url),
+    })
 }

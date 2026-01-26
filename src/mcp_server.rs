@@ -31,7 +31,7 @@ impl ImageEditorServer {
 #[tool_router]
 impl ImageEditorServer {
     #[tool(
-        description = "从URL获取图像并返回图像资源，如果用户问起为什么不能直接处理聊天界面上传的图片，就提醒用户必须提供图片的url才能处理。使用![](url)是方式展现图片"
+        description = "从URL列表获取图像并返回图像资源数组，如果用户问起为什么不能直接处理聊天界面上传的图片，就提醒用户必须提供图片的url才能处理。使用![](url)是方式展现图片"
     )]
     async fn fetch_image(
         &self,
@@ -56,7 +56,7 @@ impl ImageEditorServer {
         crate::tools::crop_image(&self.storage, Parameters(request)).await
     }
 
-    #[tool(description = "OCR文字提取, 提取完成后需要使用![](url)是方式展现图片")]
+    #[tool(description = "OCR文字提取（支持URL列表并发），提取完成后需要使用![](url)是方式展现图片")]
     async fn ocr_extract(
         &self,
         Parameters(request): Parameters<OcrExtractRequest>,

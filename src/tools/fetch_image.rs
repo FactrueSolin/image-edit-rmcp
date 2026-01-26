@@ -6,6 +6,7 @@ use rmcp::{
     schemars::JsonSchema,
 };
 use serde::{Deserialize, Serialize};
+use tokio::task::JoinSet;
 
 use chrono::Utc;
 
@@ -22,8 +23,8 @@ use crate::{
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct FetchImageRequest {
-    #[schemars(description = "图像URL")]
-    pub url: String,
+    #[schemars(description = "图像URL列表")]
+    pub urls: Vec<String>,
     #[schemars(description = "需要关注的重要内容")]
     pub focus: Option<String>,
 }
@@ -42,9 +43,67 @@ pub async fn fetch_image(
     storage: &LocalFileStorage,
     Parameters(request): Parameters<FetchImageRequest>,
 ) -> Result<CallToolResult, McpError> {
-    let validated_url = validate_http_url(&request.url)?;
+    if request.urls.is_empty() {
+        return Err(McpError::invalid_params("urls不能为空", None));
+    }
+
+    let total = request.urls.len();
+    let focus = request.focus.clone();
+    let mut join_set = JoinSet::new();
+
+    for (index, url) in request.urls.into_iter().enumerate() {
+        let storage = storage.clone();
+        let focus = focus.clone();
+        join_set.spawn(async move {
+            let result = fetch_single_image(&storage, &url, focus.as_deref()).await;
+            (index, result)
+        });
+    }
+
+    let mut results: Vec<Option<ToolResponse>> = std::iter::repeat_with(|| None)
+        .take(total)
+        .collect();
+    while let Some(task_result) = join_set.join_next().await {
+        let (index, result) = task_result.map_err(|err| {
+            McpError::internal_error(
+                "fetch image task failed",
+                Some(serde_json::Value::String(err.to_string())),
+            )
+        })?;
+        let response = result?;
+        results[index] = Some(response);
+    }
+
+    let mut responses = Vec::with_capacity(total);
+    for item in results {
+        match item {
+            Some(response) => responses.push(response),
+            None => {
+                return Err(McpError::internal_error(
+                    "fetch image task missing result",
+                    None,
+                ))
+            }
+        }
+    }
+
+    let json = serde_json::to_string(&responses).map_err(|err| {
+        McpError::internal_error(
+            "serialize tool response failed",
+            Some(serde_json::Value::String(err.to_string())),
+        )
+    })?;
+    Ok(CallToolResult::success(vec![Content::text(json)]))
+}
+
+async fn fetch_single_image(
+    storage: &LocalFileStorage,
+    raw_url: &str,
+    focus: Option<&str>,
+) -> Result<ToolResponse, McpError> {
+    let validated_url = validate_http_url(raw_url)?;
     let validated_url = validated_url.to_string();
-    let cache_key_input = match request.focus.as_deref() {
+    let cache_key_input = match focus {
         Some(focus) if !focus.trim().is_empty() => {
             format!("{}::{}", validated_url, focus.trim())
         }
@@ -71,21 +130,12 @@ pub async fn fetch_image(
                     Some(serde_json::Value::String(err.to_string())),
                 )
             })?;
-            let response = ToolResponse {
+            return Ok(ToolResponse {
                 url: metadata.original_url,
                 name: metadata.name,
                 mime_type: metadata.mime_type,
                 text: format!("{}\n\n图像信息: {}", metadata.description, info_json),
-            };
-            let json = serde_json::to_string(&response).map_err(|err| {
-                McpError::internal_error(
-                    "serialize tool response failed",
-                    Some(serde_json::Value::String(err.to_string())),
-                )
-            })?;
-            return Ok(CallToolResult::success(vec![
-                Content::text(json),
-            ]));
+            });
         }
     }
     let response = reqwest::get(&validated_url).await.map_err(|err| {
@@ -126,7 +176,7 @@ pub async fn fetch_image(
             if let Ok((desc_name, desc_text)) = modelscope::describe_image_with_qwen(
                 &validated_url,
                 &api_key,
-                request.focus.as_deref(),
+                focus,
             )
             .await
             {
@@ -190,17 +240,10 @@ pub async fn fetch_image(
         )
     })?;
 
-    let response = ToolResponse {
+    Ok(ToolResponse {
         url: validated_url,
         name,
         mime_type,
         text: format!("{}\n\n图像信息: {}", description, info_json),
-    };
-    let json = serde_json::to_string(&response).map_err(|err| {
-        McpError::internal_error(
-            "serialize tool response failed",
-            Some(serde_json::Value::String(err.to_string())),
-        )
-    })?;
-    Ok(CallToolResult::success(vec![Content::text(json)]))
+    })
 }
