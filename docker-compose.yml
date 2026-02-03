@@ -8,3 +8,5 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+    ports:
+      - "13001:3000"
