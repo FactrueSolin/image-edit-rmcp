@@ -1,4 +1,4 @@
-FROM rust:1.76-slim AS builder
+FROM rust:1.85-bookworm AS builder
 
 WORKDIR /app
 
