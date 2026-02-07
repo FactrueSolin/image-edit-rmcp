@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use rmcp::{
     ErrorData as McpError, ServerHandler,
-    handler::server::{router::tool::ToolRouter, tool::Parameters},
+    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{CallToolResult, ServerCapabilities, ServerInfo},
     tool, tool_handler, tool_router,
 };
@@ -56,7 +56,9 @@ impl ImageEditorServer {
         crate::tools::crop_image(&self.storage, Parameters(request)).await
     }
 
-    #[tool(description = "OCR文字提取（支持URL列表并发），提取完成后需要使用![](url)是方式展现图片")]
+    #[tool(
+        description = "OCR文字提取（支持URL列表并发），提取完成后需要使用![](url)是方式展现图片"
+    )]
     async fn ocr_extract(
         &self,
         Parameters(request): Parameters<OcrExtractRequest>,

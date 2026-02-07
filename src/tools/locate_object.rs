@@ -1,6 +1,6 @@
 use rmcp::{
     ErrorData as McpError,
-    handler::server::tool::Parameters,
+    handler::server::wrapper::Parameters,
     model::{CallToolResult, Content},
     schemars::JsonSchema,
 };

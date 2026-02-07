@@ -1,17 +1,17 @@
-use anyhow::Result;
-use rmcp::{
-    ErrorData as McpError,
-    handler::server::tool::Parameters,
-    model::{CallToolResult, Content},
-    schemars::JsonSchema,
-};
-use serde::Deserialize;
-use chrono::Utc;
 use crate::{
     cache::{AiImageRecord, LocalFileStorage, save_ai_image_record},
     modelscope,
     tools::{ToolResponse, validate_http_url},
 };
+use anyhow::Result;
+use chrono::Utc;
+use rmcp::{
+    ErrorData as McpError,
+    handler::server::wrapper::Parameters,
+    model::{CallToolResult, Content},
+    schemars::JsonSchema,
+};
+use serde::Deserialize;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct EditImageRequest {
@@ -34,10 +34,7 @@ pub async fn edit_image(
     let api_key = std::env::var("MODELSCOPE_API_KEY")
         .map_err(|_| McpError::internal_error("missing MODELSCOPE_API_KEY", None))?;
     if api_key.trim().is_empty() {
-        return Err(McpError::internal_error(
-            "missing MODELSCOPE_API_KEY",
-            None,
-        ));
+        return Err(McpError::internal_error("missing MODELSCOPE_API_KEY", None));
     }
     let prompt = request.prompt.clone();
     let source_image_url = validated_url.clone();

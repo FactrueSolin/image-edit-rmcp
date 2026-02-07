@@ -1,20 +1,16 @@
 use anyhow::Result;
+use base64::Engine;
+use chrono::Utc;
 use rmcp::{
     ErrorData as McpError,
-    handler::server::tool::Parameters,
+    handler::server::wrapper::Parameters,
     model::{CallToolResult, Content},
     schemars::JsonSchema,
 };
 use serde::Deserialize;
-use chrono::Utc;
-use base64::Engine;
 
 use crate::{
-    cache::{
-        LocalFileStorage,
-        ProcessedImageCacheMetadata,
-        compute_hash,
-    },
+    cache::{LocalFileStorage, ProcessedImageCacheMetadata, compute_hash},
     image_processing,
     tools::{ToolResponse, validate_http_url},
 };
@@ -52,10 +48,7 @@ pub async fn crop_image(
         ));
     }
 
-    let cache_key_input = format!(
-        "crop:{}:{}:{}:{}:{}",
-        validated_url, x1, y1, x2, y2
-    );
+    let cache_key_input = format!("crop:{}:{}:{}:{}:{}", validated_url, x1, y1, x2, y2);
     let hash = compute_hash(&cache_key_input);
     let prefix = format!("processed/{hash}");
     let meta_key = LocalFileStorage::get_meta_key(&prefix);
@@ -73,9 +66,7 @@ pub async fn crop_image(
                     Some(serde_json::Value::String(err.to_string())),
                 )
             })?;
-            return Ok(CallToolResult::success(vec![
-                Content::text(json),
-            ]));
+            return Ok(CallToolResult::success(vec![Content::text(json)]));
         }
     }
 
@@ -138,9 +129,7 @@ pub async fn crop_image(
         return Err(McpError::invalid_params("cropped size is zero", None));
     }
 
-    let expected_len = width
-        .saturating_mul(height)
-        .saturating_mul(4u32) as usize;
+    let expected_len = width.saturating_mul(height).saturating_mul(4u32) as usize;
     if pixels.len() != expected_len {
         return Err(McpError::internal_error("invalid image buffer", None));
     }
@@ -157,14 +146,13 @@ pub async fn crop_image(
         }
     }
 
-    let cropped_bytes = image_processing::encode_png(&cropped_pixels, new_width, new_height).map_err(
-        |err| {
+    let cropped_bytes = image_processing::encode_png(&cropped_pixels, new_width, new_height)
+        .map_err(|err| {
             McpError::internal_error(
                 "encode image failed",
                 Some(serde_json::Value::String(err.to_string())),
             )
-        },
-    )?;
+        })?;
 
     let cached_image_key = LocalFileStorage::get_result_key(&prefix, "png");
     if let Err(_err) = storage.put(&cached_image_key, &cropped_bytes).await {
